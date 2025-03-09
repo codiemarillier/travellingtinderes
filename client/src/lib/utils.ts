@@ -34,19 +34,19 @@ export function getPriceLevelDescription(level: number): string {
 export function categoryToColor(category: string): string {
   switch (category) {
     case 'Beach':
-      return 'bg-secondary/80 text-white';
+      return 'bg-cyan-500/80 text-white';
     case 'Mountain':
-      return 'bg-emerald-500/80 text-white';
+      return 'bg-emerald-600/80 text-white';
     case 'City':
-      return 'bg-blue-500/80 text-white';
+      return 'bg-blue-600/80 text-white';
     case 'Cultural':
-      return 'bg-purple-500/80 text-white';
+      return 'bg-teal-500/80 text-white';
     case 'Adventure':
-      return 'bg-accent/80 text-amber-700';
+      return 'bg-sky-500/80 text-white';
     case 'Relaxation':
-      return 'bg-pink-400/80 text-white';
+      return 'bg-green-500/80 text-white';
     default:
-      return 'bg-gray-500/80 text-white';
+      return 'bg-blue-gray-500/80 text-white';
   }
 }
 
