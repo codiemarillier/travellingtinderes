@@ -48,8 +48,12 @@ const Explore: React.FC<ExploreProps> = ({ user, appMode }) => {
   });
 
   // Mutation to create a new group
-  const createGroupMutation = useMutation({
-    mutationFn: (groupData: { name: string; creatorId: number; preferences: string }) => {
+  const createGroupMutation = useMutation<
+    Group, 
+    Error, 
+    { name: string; creatorId: number; preferences: string }
+  >({
+    mutationFn: (groupData) => {
       return apiRequest<Group>('POST', '/api/groups', {
         name: groupData.name,
         creatorId: groupData.creatorId,

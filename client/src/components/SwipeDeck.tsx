@@ -281,7 +281,7 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({ user, filters, appMode, groupId }
             >
               Start Over
             </Button>
-            <Link href="/favorites">
+            <Link to="/favorites">
               <div className="text-primary font-medium cursor-pointer">
                 View Your Favorites
               </div>

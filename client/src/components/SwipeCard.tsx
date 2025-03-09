@@ -1,6 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { DestinationCard } from '@shared/types';
 import { formatPriceLevel, categoryToColor } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+import { useSwipe } from '@/hooks/use-swipe';
 
 interface SwipeCardProps {
   destination: DestinationCard;
@@ -19,138 +21,141 @@ const SwipeCard: React.FC<SwipeCardProps> = ({
   isActive,
   zIndex
 }) => {
-  const [dragStartX, setDragStartX] = useState<number | null>(null);
-  const [currentX, setCurrentX] = useState<number>(0);
-  const [isDragging, setIsDragging] = useState<boolean>(false);
-  
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [isClicked, setIsClicked] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (!isActive) return;
-    setDragStartX(e.clientX);
-    setIsDragging(true);
-  };
+  // Use our custom swipe hook for better touch handling
+  const { 
+    handleTouchStart, 
+    handleTouchMove, 
+    handleTouchEnd,
+    swipingDirection,
+    swipePercentage
+  } = useSwipe({
+    onSwipeLeft: () => {
+      if (isActive) onSwipeLeft();
+    },
+    onSwipeRight: () => {
+      if (isActive) onSwipeRight();
+    },
+    threshold: 0.4, // 40% of the element width
+  });
   
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (!isActive) return;
-    setDragStartX(e.touches[0].clientX);
-    setIsDragging(true);
-  };
+  // Calculate rotation and opacity based on swipe percentage
+  const rotation = swipePercentage * 10; // max 10 degrees rotation
   
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging || dragStartX === null) return;
-    e.preventDefault();
-    const diff = e.clientX - dragStartX;
-    setCurrentX(diff);
-  };
-  
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!isDragging || dragStartX === null) return;
-    const diff = e.touches[0].clientX - dragStartX;
-    setCurrentX(diff);
-  };
-  
-  const handleTap = () => {
-    if (!isDragging && isActive) {
+  // Handle tap/click events
+  const handleCardClick = () => {
+    if (isActive && !swipingDirection) {
+      setIsClicked(true);
       onTap();
+      
+      // Reset click state after animation
+      setTimeout(() => {
+        setIsClicked(false);
+      }, 150);
     }
   };
   
-  const handleDragEnd = () => {
-    if (!isDragging) return;
-    
-    const threshold = window.innerWidth * 0.2; // 20% of screen width
-    
-    if (currentX > threshold) {
-      onSwipeRight();
-    } else if (currentX < -threshold) {
-      onSwipeLeft();
-    }
-    
-    setDragStartX(null);
-    setCurrentX(0);
-    setIsDragging(false);
+  // Handle image load event
+  const handleImageLoad = () => {
+    setImageLoaded(true);
   };
   
-  // Calculate card rotation based on drag distance
-  const rotation = currentX * 0.1; // 0.1 degrees per pixel
-  
-  // Calculate opacity for like/nope indicators
-  const likeOpacity = Math.min(Math.max(currentX / 100, 0), 1);
-  const nopeOpacity = Math.min(Math.max(-currentX / 100, 0), 1);
-  
-  // Apply transform styles based on drag state
-  const transformStyle = isDragging
-    ? { transform: `translateX(${currentX}px) rotate(${rotation}deg)` }
-    : {};
-    
-  const isSwiping = currentX !== 0;
-  const isSwipingRight = currentX > 0;
-  const isSwipingLeft = currentX < 0;
+  // Handle component visibility
+  useEffect(() => {
+    // Preload the image when component is mounted
+    if (destination.imageUrl) {
+      const img = new Image();
+      img.src = destination.imageUrl;
+      img.onload = handleImageLoad;
+    }
+  }, [destination.imageUrl]);
   
   return (
     <div 
       ref={cardRef}
-      className="card absolute w-full h-full rounded-2xl shadow-lg overflow-hidden"
+      className={cn(
+        "card absolute w-full h-full rounded-2xl shadow-lg overflow-hidden select-none transition-all",
+        isClicked && "scale-[0.98]",
+        !isActive && "pointer-events-none"
+      )}
       style={{ 
-        ...transformStyle,
+        transform: swipingDirection ? `translateX(${swipePercentage * 80}px) rotate(${rotation}deg)` : 'none',
         zIndex,
-        transition: isDragging ? 'none' : 'transform 0.3s ease'
+        opacity: isActive ? 1 : 0.5,
+        transition: swipingDirection ? 'none' : 'all 0.3s ease',
       }}
-      onMouseDown={handleMouseDown}
-      onTouchStart={handleTouchStart}
-      onMouseMove={handleMouseMove}
-      onTouchMove={handleTouchMove}
-      onMouseUp={handleDragEnd}
-      onTouchEnd={handleDragEnd}
-      onMouseLeave={handleDragEnd}
-      onClick={handleTap}
+      onMouseDown={isActive ? handleTouchStart : undefined}
+      onTouchStart={isActive ? handleTouchStart : undefined}
+      onMouseMove={isActive ? handleTouchMove : undefined}
+      onTouchMove={isActive ? handleTouchMove : undefined}
+      onMouseUp={isActive ? handleTouchEnd : undefined}
+      onTouchEnd={isActive ? handleTouchEnd : undefined}
+      onMouseLeave={isActive ? handleTouchEnd : undefined}
+      onClick={handleCardClick}
     >
       {/* Like indicator */}
-      <div 
-        className="absolute top-5 right-5 py-2 px-4 bg-primary border-2 border-white text-white font-bold rounded-lg transform -rotate-15 z-10"
-        style={{ 
-          opacity: likeOpacity,
-          transform: 'rotate(-15deg)'
-        }}
-      >
-        LIKE
-      </div>
+      {swipingDirection === 'right' && (
+        <div className="absolute top-5 right-5 py-2 px-4 bg-primary border-2 border-white text-white font-bold rounded-lg transform -rotate-15 z-10">
+          LIKE
+        </div>
+      )}
       
       {/* Nope indicator */}
-      <div 
-        className="absolute top-5 left-5 py-2 px-4 bg-secondary border-2 border-white text-white font-bold rounded-lg transform -rotate-15 z-10"
-        style={{ 
-          opacity: nopeOpacity,
-          transform: 'rotate(-15deg)'
-        }}
-      >
-        NOPE
-      </div>
+      {swipingDirection === 'left' && (
+        <div className="absolute top-5 left-5 py-2 px-4 bg-secondary border-2 border-white text-white font-bold rounded-lg transform rotate-15 z-10">
+          NOPE
+        </div>
+      )}
       
-      {/* Background image */}
+      {/* Image loading skeleton */}
+      {!imageLoaded && (
+        <div className="absolute inset-0 bg-gray-200 animate-pulse flex items-center justify-center">
+          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+        </div>
+      )}
+      
+      {/* Background image with fade-in effect */}
       <img 
         src={destination.imageUrl} 
         alt={`${destination.name}, ${destination.country}`}
-        className="w-full h-full object-cover"
+        className={cn(
+          "w-full h-full object-cover transition-opacity duration-300",
+          imageLoaded ? "opacity-100" : "opacity-0"
+        )}
+        onLoad={handleImageLoad}
       />
       
       {/* Content overlay */}
       <div className="absolute bottom-0 left-0 right-0 p-5 bg-gradient-to-t from-black/80 to-transparent text-white">
-        <h2 className="text-2xl font-semibold mb-1 font-['Poppins']">
-          {destination.name}, {destination.country}
-        </h2>
-        <div className="flex items-center gap-2 mb-1">
-          <div className="text-accent">
-            {formatPriceLevel(destination.priceLevel)}
+        <div className="flex justify-between items-start">
+          <div>
+            <h2 className="text-2xl font-semibold mb-1 font-['Poppins']">
+              {destination.name}, {destination.country}
+            </h2>
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <div className="text-amber-400 font-medium">
+                {formatPriceLevel(destination.priceLevel)}
+              </div>
+              {destination.categories.map(category => (
+                <span key={category} className={`text-xs px-2 py-0.5 rounded-full ${categoryToColor(category)}`}>
+                  {category}
+                </span>
+              ))}
+            </div>
           </div>
-          {destination.categories.slice(0, 2).map(category => (
-            <span key={category} className={`text-sm px-2 py-0.5 rounded ${categoryToColor(category)}`}>
-              {category}
-            </span>
-          ))}
+          <div className="bg-black/40 p-1 rounded-full">
+            <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white cursor-pointer" onClick={(e) => {
+              e.stopPropagation();
+              onTap();
+            }}>
+              <i className="fas fa-info"></i>
+            </div>
+          </div>
         </div>
-        <p className="text-sm text-gray-200">{destination.description}</p>
+        <p className="text-sm text-gray-200 line-clamp-2">{destination.description}</p>
       </div>
     </div>
   );

@@ -8,11 +8,17 @@ interface SwipeHandlers {
   swipePercentage: number;
 }
 
-export function useSwipe(
-  onSwipeLeft: () => void,
-  onSwipeRight: () => void,
+interface SwipeOptions {
+  onSwipeLeft: () => void;
+  onSwipeRight: () => void;
+  threshold?: number;
+}
+
+export function useSwipe({
+  onSwipeLeft,
+  onSwipeRight,
   threshold = 0.3
-): SwipeHandlers {
+}: SwipeOptions): SwipeHandlers {
   const [startX, setStartX] = useState<number | null>(null);
   const [currentX, setCurrentX] = useState<number | null>(null);
   const elementRef = useRef<HTMLElement | null>(null);
