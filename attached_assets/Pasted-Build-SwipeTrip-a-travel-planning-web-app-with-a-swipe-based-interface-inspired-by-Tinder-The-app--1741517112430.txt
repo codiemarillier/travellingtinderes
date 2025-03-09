@@ -1,0 +1,55 @@
+Build SwipeTrip, a travel planning web app with a swipe-based interface inspired by Tinder. The app helps users discover and choose travel destinations individually or with friends.
+
+Core Features:
+
+	•	Swipe Interface: Users swipe right to say ‘yes’ to a destination, left for ‘no’. Tapping a card reveals details like hotel options, price ranges, and traveler tips. Use a library like Hammer.js for smooth swipe gestures, with animations for feedback (e.g., a slight bounce when swiping).
+	•	Solo Mode: Users explore destinations, save their favorites to a personal list, and connect with ‘travel buddies’ who also swiped right on the same destinations. Include a chat feature for matched users to discuss plans.
+	•	Crew Mode: For group travel, users create or join groups with friends. Everyone swipes on destinations within a set time limit (e.g., 24 hours). After voting ends, display a leaderboard ranking destinations by ‘yes’ votes. Add filters (price range, location type like beach or city) and let groups lock in a winner, followed by itinerary planning tools.
+
+Additional Features (Value-Added):
+
+	•	Personalized Recommendations: Suggest destinations based on users’ swiping history (e.g., if they like tropical spots, recommend more beach destinations).
+	•	Budget Planning Tool: Allow users to set a travel budget, filtering destinations and showing cost breakdowns (flights, hotels, etc.).
+	•	Itinerary Builder: Once a destination is chosen, users can create a day-by-day trip plan within the app, with options to add activities and share with buddies or groups.
+	•	Safety Features: For travel buddy connections, include email verification and a reporting system. Add safety tips for each destination.
+	•	Offline Mode: Let users view saved destinations and itineraries without an internet connection, using caching or local storage.
+	•	Notifications: Send alerts for new travel buddy matches, group voting results, or special deals on destinations.
+
+Technical Requirements:
+
+	•	Frontend: Use React to build a dynamic, responsive UI. Implement swipe gestures with a library like Hammer.js.
+	•	Backend: Use Node.js with Express to handle API requests and logic.
+	•	Database: Store user profiles, destination data, and group info in MongoDB.
+	•	Real-time Features: Use WebSockets or Socket.io for live chat and group voting updates.
+
+Design:
+
+	•	Create an image-heavy UI with large, high-quality destination photos on each card, plus the destination name and a short description.
+	•	Keep it minimalist: few buttons, focusing on swipes and taps. Use a bright color scheme (e.g., coral for ‘yes’, teal for ‘no’).
+	•	Ensure a responsive, mobile-first design that also works on desktop.
+
+Data Management:
+
+	•	Source destination data from a travel API (e.g., Amadeus) or a curated list. Include high-quality images, descriptions, hotel options, price ranges, and tips. Update data regularly to stay current.
+
+User Authentication:
+
+	•	Implement secure login with JWT or OAuth. Support signup via email or social media (e.g., Google, Facebook). Allow users to configure privacy settings.
+
+Social Features:
+
+	•	Travel Buddies: Match users who swipe right on the same destination. Provide a simple chat interface with real-time messaging. Include user profiles with photos, bios, travel preferences, and past trips.
+	•	Crew Mode Chat: Add a group chat for friends to discuss plans during and after voting.
+
+Development Approach:
+
+	•	Start with an MVP: Focus on Solo Mode’s swipe and save features first.
+	•	Gradually add Crew Mode, social features, and extras like itinerary planning.
+	•	Use agile development: iterate based on testing and imaginary user feedback.
+
+Example Scenario:
+
+Sarah opens SwipeTrip in Solo Mode, swipes right on Bali, taps for details (hotels, prices, tips), and saves it. She matches with John, who also liked Bali, and they chat about a trip. Later, in Crew Mode, Sarah’s friend group swipes on summer destinations. After 24 hours, Paris wins with the most votes, and they use the app to plan their itinerary.
+
+Focus on creating an engaging, user-friendly experience that makes travel planning fun, social, and seamless. Aim for smooth performance (e.g., lazy load images) and accessibility (e.g., keyboard navigation).”
+
