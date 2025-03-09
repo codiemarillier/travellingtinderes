@@ -32,8 +32,17 @@ const Explore: React.FC<ExploreProps> = ({ user, appMode }) => {
   
   const { toast } = useToast();
   
+  // Define group interface
+  interface Group {
+    id: number;
+    name: string;
+    creatorId: number;
+    createdAt: Date;
+    voteEndTime?: Date | null;
+  }
+
   // Query to fetch user's groups if in Crew mode
-  const { data: groups = [], isLoading: isLoadingGroups } = useQuery({
+  const { data: groups = [], isLoading: isLoadingGroups } = useQuery<Group[]>({
     queryKey: [`/api/users/${user.id}/groups`],
     enabled: appMode === 'Crew',
   });
@@ -41,13 +50,13 @@ const Explore: React.FC<ExploreProps> = ({ user, appMode }) => {
   // Mutation to create a new group
   const createGroupMutation = useMutation({
     mutationFn: (groupData: { name: string; creatorId: number; preferences: string }) => {
-      return apiRequest('POST', '/api/groups', {
+      return apiRequest<Group>('POST', '/api/groups', {
         name: groupData.name,
         creatorId: groupData.creatorId,
         preferences: groupData.preferences
       });
     },
-    onSuccess: (data) => {
+    onSuccess: (data: Group) => {
       toast({
         title: "Trip Crew Created!",
         description: `${newGroupName} has been created successfully.`,

@@ -7,6 +7,7 @@ import DestinationDetails from './DestinationDetails';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { queryClient } from '@/lib/queryClient';
+import { Link } from 'wouter';
 
 interface SwipeDeckProps {
   user: UserProfile;
@@ -224,9 +225,30 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({ user, filters, appMode, groupId }
   
   return (
     <div className="flex flex-col h-full">
-      <div className="card-container relative flex-1 max-w-md mx-auto">
+      <div className="card-container relative flex-1 max-w-md mx-auto w-full">
+        {/* Instruction overlay when no cards have been swiped */}
+        {currentIndex === 0 && (
+          <div className="absolute inset-0 z-50 pointer-events-none flex flex-col items-center justify-center">
+            <div className="bg-black/20 backdrop-blur-sm text-white p-4 rounded-xl text-center mx-4 mb-24">
+              <div className="flex justify-center space-x-6 mb-3">
+                <div className="flex flex-col items-center">
+                  <i className="fas fa-arrow-left text-xl mb-1"></i>
+                  <span className="text-sm">Swipe left</span>
+                  <span className="text-xs">to skip</span>
+                </div>
+                <div className="flex flex-col items-center">
+                  <i className="fas fa-arrow-right text-xl mb-1"></i>
+                  <span className="text-sm">Swipe right</span>
+                  <span className="text-xs">to like</span>
+                </div>
+              </div>
+              <p className="text-xs">Tap for details</p>
+            </div>
+          </div>
+        )}
+        
         {destinations.map((destination, index) => {
-          // Only render cards that are the current one or the next few
+          // Only render current card and next 2 to improve performance
           if (index < currentIndex || index > currentIndex + 2) return null;
           
           return (
@@ -241,11 +263,37 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({ user, filters, appMode, groupId }
             />
           );
         })}
+        
+        {/* Empty state when all cards have been swiped */}
+        {destinations.length > 0 && currentIndex >= destinations.length && !isLoadingMoreCards && (
+          <div className="flex flex-col items-center justify-center h-full text-center p-4">
+            <div className="text-primary text-6xl mb-4">
+              <i className="fas fa-check-circle"></i>
+            </div>
+            <h3 className="text-xl font-bold mb-2">You've seen all destinations!</h3>
+            <p className="text-gray-600 mb-5">
+              Check out your matches or swipe through destinations again
+            </p>
+            <Button 
+              onClick={() => setCurrentIndex(0)}
+              variant="outline"
+              className="mb-2"
+            >
+              Start Over
+            </Button>
+            <Link href="/favorites">
+              <div className="text-primary font-medium cursor-pointer">
+                View Your Favorites
+              </div>
+            </Link>
+          </div>
+        )}
       </div>
       
+      {/* Action buttons */}
       <div className="action-buttons flex justify-around py-5 max-w-sm mx-auto">
         <button 
-          className="action-button w-12 h-12 rounded-full bg-light text-dark flex items-center justify-center shadow-md hover:shadow-lg active:scale-95 transition-all"
+          className="action-button w-12 h-12 rounded-full bg-light text-dark flex items-center justify-center shadow-md hover:shadow-lg active:scale-95 transition-all disabled:opacity-30"
           onClick={handleRewind}
           disabled={currentIndex === 0}
         >
@@ -255,6 +303,7 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({ user, filters, appMode, groupId }
         <button 
           className="action-button w-14 h-14 rounded-full bg-secondary text-white flex items-center justify-center shadow-md hover:shadow-lg active:scale-95 transition-all"
           onClick={handleSwipeLeft}
+          disabled={destinations.length === 0 || currentIndex >= destinations.length}
         >
           <i className="fas fa-times text-xl"></i>
         </button>
@@ -262,6 +311,7 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({ user, filters, appMode, groupId }
         <button 
           className="action-button w-12 h-12 rounded-full bg-white text-dark flex items-center justify-center shadow-md hover:shadow-lg active:scale-95 transition-all"
           onClick={handleTap}
+          disabled={destinations.length === 0 || currentIndex >= destinations.length}
         >
           <i className="fas fa-info"></i>
         </button>
@@ -269,6 +319,7 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({ user, filters, appMode, groupId }
         <button 
           className="action-button w-14 h-14 rounded-full bg-primary text-white flex items-center justify-center shadow-md hover:shadow-lg active:scale-95 transition-all"
           onClick={handleSwipeRight}
+          disabled={destinations.length === 0 || currentIndex >= destinations.length}
         >
           <i className="fas fa-heart text-xl"></i>
         </button>
