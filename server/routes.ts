@@ -1,65 +1,59 @@
-import express, { type Express, Request, Response } from "express";
+import { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { 
-  insertUserSchema, 
-  insertUserLikeSchema, 
-  insertTravelCrewSchema, 
-  insertCrewMemberSchema,
-  insertTravelBuddySchema
-} from "@shared/schema";
+import { WebSocketServer, WebSocket } from "ws";
 import { z } from "zod";
+import { insertUserSchema, insertSwipeSchema, insertTravelBuddySchema, insertGroupSchema, insertGroupMemberSchema, insertGroupVoteSchema } from "@shared/schema";
+import { FilterOptions } from "@shared/types";
 
-// Middleware to protect routes requiring authentication
-const authMiddleware = async (req: Request, res: Response, next: any) => {
-  // For this demo, we'll use a simple query or session-based auth
-  const userId = req.session?.userId;
-  
-  if (!userId) {
-    return res.status(401).json({ message: "Unauthorized" });
-  }
-  
-  try {
-    const user = await storage.getUser(Number(userId));
-    if (!user) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-    
-    req.user = user;
-    next();
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
-  }
-};
+const wsClients = new Map<number, WebSocket>();
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
-
-  // Set up session middleware
-  const session = require("express-session");
-  const MemoryStore = require("memorystore")(session);
   
-  app.use(
-    session({
-      cookie: { maxAge: 86400000 },
-      store: new MemoryStore({
-        checkPeriod: 86400000, // prune expired entries every 24h
-      }),
-      resave: false,
-      saveUninitialized: false,
-      secret: process.env.SESSION_SECRET || "swipetrip-secret",
-    })
-  );
-
-  // Authentication routes
-  app.post("/api/auth/register", async (req, res) => {
+  // WebSocket setup for real-time features
+  const wss = new WebSocketServer({ 
+    server: httpServer,
+    path: '/ws'
+  });
+  
+  console.log('WebSocket server initialized on path: /ws');
+  
+  wss.on("connection", (ws) => {
+    let userId: number | undefined;
+    
+    ws.on("message", (message: string) => {
+      try {
+        const data = JSON.parse(message);
+        
+        if (data.type === 'auth' && data.userId) {
+          userId = data.userId;
+          wsClients.set(userId, ws);
+          ws.send(JSON.stringify({ type: 'auth_success' }));
+        }
+      } catch (error) {
+        console.error("WebSocket message error:", error);
+      }
+    });
+    
+    ws.on("close", () => {
+      if (userId) {
+        wsClients.delete(userId);
+      }
+    });
+  });
+  
+  // API Routes
+  // Prefix all routes with /api
+  
+  // Auth Routes
+  app.post("/api/auth/register", async (req: Request, res: Response) => {
     try {
       const userData = insertUserSchema.parse(req.body);
       
       // Check if username or email already exists
-      const existingUsername = await storage.getUserByUsername(userData.username);
-      if (existingUsername) {
+      const existingUser = await storage.getUserByUsername(userData.username);
+      if (existingUser) {
         return res.status(400).json({ message: "Username already taken" });
       }
       
@@ -68,30 +62,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Email already in use" });
       }
       
-      // Create new user
-      const user = await storage.createUser(userData);
+      // In a real app, you would hash the password here
+      const newUser = await storage.createUser(userData);
       
-      // Store user ID in session
-      req.session.userId = user.id;
+      // Remove the password from the response
+      const { password, ...userWithoutPassword } = newUser;
       
-      // Return user data (excluding password)
-      const { password, ...userWithoutPassword } = user;
       res.status(201).json(userWithoutPassword);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: error.message });
+        return res.status(400).json({ message: "Invalid data", errors: error.errors });
       }
-      console.error(error);
-      res.status(500).json({ message: "Failed to register user" });
+      res.status(500).json({ message: "Server error" });
     }
   });
-
-  app.post("/api/auth/login", async (req, res) => {
+  
+  app.post("/api/auth/login", async (req: Request, res: Response) => {
     try {
       const { username, password } = req.body;
       
       if (!username || !password) {
-        return res.status(400).json({ message: "Username and password are required" });
+        return res.status(400).json({ message: "Username and password required" });
       }
       
       const user = await storage.getUserByUsername(username);
@@ -100,241 +91,534 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Invalid credentials" });
       }
       
-      // Store user ID in session
-      req.session.userId = user.id;
+      // In a real app, you would use JWT or sessions here
       
-      // Return user data (excluding password)
+      // Remove the password from the response
       const { password: _, ...userWithoutPassword } = user;
-      res.json(userWithoutPassword);
+      
+      res.status(200).json(userWithoutPassword);
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to authenticate" });
+      res.status(500).json({ message: "Server error" });
     }
   });
-
-  app.post("/api/auth/logout", (req, res) => {
-    req.session.destroy((err: any) => {
-      if (err) {
-        return res.status(500).json({ message: "Failed to logout" });
+  
+  // Destination Routes
+  app.get("/api/destinations", async (req: Request, res: Response) => {
+    try {
+      const priceLevel = req.query.priceLevel ? 
+        (Array.isArray(req.query.priceLevel) 
+          ? req.query.priceLevel.map(p => parseInt(p as string)) 
+          : [parseInt(req.query.priceLevel as string)]) 
+        : undefined;
+      
+      const categories = req.query.categories ? 
+        (Array.isArray(req.query.categories) 
+          ? req.query.categories as string[] 
+          : [req.query.categories as string]) 
+        : undefined;
+      
+      const region = req.query.region as string | undefined;
+      
+      const filters: FilterOptions = {};
+      
+      if (priceLevel) filters.priceLevel = priceLevel as any;
+      if (categories) filters.categories = categories as any;
+      if (region) filters.region = region as any;
+      
+      const destinations = Object.keys(filters).length > 0 
+        ? await storage.getFilteredDestinations(filters)
+        : await storage.getAllDestinations();
+      
+      res.status(200).json(destinations);
+    } catch (error) {
+      res.status(500).json({ message: "Server error" });
+    }
+  });
+  
+  app.get("/api/destinations/:id", async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "Invalid ID" });
       }
-      res.json({ message: "Logged out successfully" });
-    });
-  });
-
-  app.get("/api/auth/me", authMiddleware, (req, res) => {
-    const { password, ...userWithoutPassword } = req.user;
-    res.json(userWithoutPassword);
-  });
-
-  // Destination routes
-  app.get("/api/destinations", async (req, res) => {
-    try {
-      const destinations = await storage.getDestinations();
-      res.json(destinations);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to fetch destinations" });
-    }
-  });
-
-  app.get("/api/destinations/:id", async (req, res) => {
-    try {
-      const destination = await storage.getDestination(Number(req.params.id));
+      
+      const destination = await storage.getDestination(id);
       
       if (!destination) {
         return res.status(404).json({ message: "Destination not found" });
       }
       
-      res.json(destination);
+      res.status(200).json(destination);
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to fetch destination" });
+      res.status(500).json({ message: "Server error" });
     }
   });
-
-  // Hotel routes
-  app.get("/api/destinations/:id/hotels", async (req, res) => {
+  
+  app.get("/api/destinations/:id/details", async (req: Request, res: Response) => {
     try {
-      const hotels = await storage.getHotels(Number(req.params.id));
-      res.json(hotels);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to fetch hotels" });
-    }
-  });
-
-  // Destination highlights routes
-  app.get("/api/destinations/:id/highlights", async (req, res) => {
-    try {
-      const highlights = await storage.getDestinationHighlights(Number(req.params.id));
-      res.json(highlights);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to fetch highlights" });
-    }
-  });
-
-  // User likes routes
-  app.get("/api/user/likes", authMiddleware, async (req, res) => {
-    try {
-      const userLikes = await storage.getUserLikes(req.user.id);
+      const id = parseInt(req.params.id);
       
-      // Get full destination data for each liked destination
-      const likedDestinations = [];
-      for (const like of userLikes) {
-        if (like.liked) {
-          const destination = await storage.getDestination(like.destinationId);
-          if (destination) {
-            likedDestinations.push({
-              ...destination,
-              savedAt: like.savedAt
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "Invalid ID" });
+      }
+      
+      const details = await storage.getDestinationDetails(id);
+      
+      if (!details) {
+        return res.status(404).json({ message: "Destination details not found" });
+      }
+      
+      res.status(200).json(details);
+    } catch (error) {
+      res.status(500).json({ message: "Server error" });
+    }
+  });
+  
+  // Swipe Routes
+  app.post("/api/swipes", async (req: Request, res: Response) => {
+    try {
+      const swipeData = insertSwipeSchema.parse(req.body);
+      
+      // Check if user exists
+      const user = await storage.getUser(swipeData.userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      // Check if destination exists
+      const destination = await storage.getDestination(swipeData.destinationId);
+      if (!destination) {
+        return res.status(404).json({ message: "Destination not found" });
+      }
+      
+      const swipe = await storage.createSwipe(swipeData);
+      
+      // If liked, check for travel buddy matches
+      if (swipe.liked) {
+        // Find other users who liked the same destination
+        const allSwipes = await storage.getAllDestinations();
+        const otherUsersWhoLiked = Array.from(allSwipes)
+          .filter(d => d.id === swipe.destinationId)
+          .map(async d => {
+            // For each user who swiped right on this destination
+            const userSwipes = await storage.getUserSwipes(d.id);
+            return userSwipes
+              .filter(s => s.liked && s.destinationId === swipe.destinationId && s.userId !== swipe.userId)
+              .map(s => s.userId);
+          });
+        
+        // Flatten the array of user IDs
+        const matchUserIds = (await Promise.all(otherUsersWhoLiked)).flat();
+        
+        // Create travel buddy matches
+        for (const matchUserId of matchUserIds) {
+          // Check if match already exists
+          const existingMatches = await storage.getTravelBuddyMatches(swipe.userId);
+          const alreadyMatched = existingMatches.some(
+            m => (m.user1Id === swipe.userId && m.user2Id === matchUserId) || 
+                 (m.user1Id === matchUserId && m.user2Id === swipe.userId)
+          );
+          
+          if (!alreadyMatched) {
+            await storage.createTravelBuddy({
+              user1Id: swipe.userId,
+              user2Id: matchUserId,
+              destinationId: swipe.destinationId,
+              status: "pending"
             });
+            
+            // Notify users via WebSocket if they're connected
+            const matchedUserWs = wsClients.get(matchUserId);
+            if (matchedUserWs) {
+              matchedUserWs.send(JSON.stringify({
+                type: "new_match",
+                destinationId: swipe.destinationId
+              }));
+            }
           }
         }
       }
       
-      res.json(likedDestinations);
+      res.status(201).json(swipe);
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to fetch liked destinations" });
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Server error" });
     }
   });
-
-  app.post("/api/user/likes", authMiddleware, async (req, res) => {
+  
+  app.get("/api/users/:userId/likes", async (req: Request, res: Response) => {
     try {
-      const likeData = insertUserLikeSchema.parse({
-        ...req.body,
-        userId: req.user.id
-      });
+      const userId = parseInt(req.params.userId);
       
-      // Check if user already liked/disliked this destination
-      const existingLike = await storage.getUserLikeByUserAndDestination(
-        likeData.userId,
-        likeData.destinationId
+      if (isNaN(userId)) {
+        return res.status(400).json({ message: "Invalid user ID" });
+      }
+      
+      const likes = await storage.getUserLikes(userId);
+      
+      // Get full destination data for each like
+      const likedDestinations = await Promise.all(
+        likes.map(async (like) => {
+          const destination = await storage.getDestination(like.destinationId);
+          return destination;
+        })
       );
       
-      if (existingLike) {
-        return res.status(400).json({ message: "Already responded to this destination" });
+      // Filter out any undefined destinations
+      const validDestinations = likedDestinations.filter(d => d !== undefined);
+      
+      res.status(200).json(validDestinations);
+    } catch (error) {
+      res.status(500).json({ message: "Server error" });
+    }
+  });
+  
+  // Travel Buddy Routes
+  app.get("/api/users/:userId/buddies", async (req: Request, res: Response) => {
+    try {
+      const userId = parseInt(req.params.userId);
+      
+      if (isNaN(userId)) {
+        return res.status(400).json({ message: "Invalid user ID" });
       }
       
-      const userLike = await storage.createUserLike(likeData);
+      const matches = await storage.getTravelBuddyMatches(userId);
       
-      // If user liked the destination, check for potential travel buddy matches
-      if (likeData.liked) {
-        // Find other users who liked this destination
-        const allLikes = await storage.getUserLikes(likeData.destinationId);
-        const otherUsersWhoLiked = allLikes.filter(
-          like => like.userId !== likeData.userId && like.liked
-        );
-        
-        // Create travel buddy matches
-        for (const otherLike of otherUsersWhoLiked) {
-          await storage.createTravelBuddy({
-            userOneId: likeData.userId,
-            userTwoId: otherLike.userId,
-            destinationId: likeData.destinationId
-          });
-        }
+      // Enrich match data with user and destination info
+      const enrichedMatches = await Promise.all(
+        matches.map(async (match) => {
+          const matchedUserId = match.user1Id === userId ? match.user2Id : match.user1Id;
+          const matchedUser = await storage.getUser(matchedUserId);
+          const destination = await storage.getDestination(match.destinationId);
+          
+          if (!matchedUser || !destination) return null;
+          
+          return {
+            id: match.id,
+            userId,
+            matchedUserId,
+            matchedUsername: matchedUser.username,
+            matchedProfileImage: matchedUser.profileImage,
+            destinationId: match.destinationId,
+            destinationName: destination.name,
+            status: match.status
+          };
+        })
+      );
+      
+      // Filter out any null results
+      const validMatches = enrichedMatches.filter(m => m !== null);
+      
+      res.status(200).json(validMatches);
+    } catch (error) {
+      res.status(500).json({ message: "Server error" });
+    }
+  });
+  
+  app.patch("/api/buddies/:id/status", async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { status } = req.body;
+      
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "Invalid ID" });
       }
       
-      res.status(201).json(userLike);
+      if (status !== "accepted" && status !== "rejected") {
+        return res.status(400).json({ message: "Invalid status" });
+      }
+      
+      const updatedBuddy = await storage.updateTravelBuddyStatus(id, status);
+      
+      if (!updatedBuddy) {
+        return res.status(404).json({ message: "Travel buddy not found" });
+      }
+      
+      // Notify the other user via WebSocket
+      const otherUserId = req.body.userId === updatedBuddy.user1Id 
+        ? updatedBuddy.user2Id 
+        : updatedBuddy.user1Id;
+      
+      const otherUserWs = wsClients.get(otherUserId);
+      if (otherUserWs) {
+        otherUserWs.send(JSON.stringify({
+          type: "buddy_status_update",
+          buddyId: id,
+          status
+        }));
+      }
+      
+      res.status(200).json(updatedBuddy);
+    } catch (error) {
+      res.status(500).json({ message: "Server error" });
+    }
+  });
+  
+  // Group Routes (Crew Mode)
+  app.post("/api/groups", async (req: Request, res: Response) => {
+    try {
+      const groupData = insertGroupSchema.parse(req.body);
+      
+      // Check if creator exists
+      const creator = await storage.getUser(groupData.creatorId);
+      if (!creator) {
+        return res.status(404).json({ message: "Creator not found" });
+      }
+      
+      const group = await storage.createGroup(groupData);
+      
+      // Add creator as member
+      await storage.addGroupMember({
+        groupId: group.id,
+        userId: group.creatorId
+      });
+      
+      res.status(201).json(group);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: error.message });
+        return res.status(400).json({ message: "Invalid data", errors: error.errors });
       }
-      console.error(error);
-      res.status(500).json({ message: "Failed to save destination response" });
+      res.status(500).json({ message: "Server error" });
     }
   });
-
-  // Travel crew routes
-  app.get("/api/crews", authMiddleware, async (req, res) => {
+  
+  app.get("/api/groups/:id", async (req: Request, res: Response) => {
     try {
-      const crews = await storage.getTravelCrewsByUserId(req.user.id);
-      res.json(crews);
+      const id = parseInt(req.params.id);
+      
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "Invalid ID" });
+      }
+      
+      const group = await storage.getGroup(id);
+      
+      if (!group) {
+        return res.status(404).json({ message: "Group not found" });
+      }
+      
+      res.status(200).json(group);
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to fetch travel crews" });
+      res.status(500).json({ message: "Server error" });
     }
   });
-
-  app.post("/api/crews", authMiddleware, async (req, res) => {
+  
+  app.get("/api/users/:userId/groups", async (req: Request, res: Response) => {
     try {
-      const crewData = insertTravelCrewSchema.parse({
+      const userId = parseInt(req.params.userId);
+      
+      if (isNaN(userId)) {
+        return res.status(400).json({ message: "Invalid user ID" });
+      }
+      
+      const groups = await storage.getUserGroups(userId);
+      
+      res.status(200).json(groups);
+    } catch (error) {
+      res.status(500).json({ message: "Server error" });
+    }
+  });
+  
+  app.post("/api/groups/:groupId/members", async (req: Request, res: Response) => {
+    try {
+      const groupId = parseInt(req.params.groupId);
+      
+      if (isNaN(groupId)) {
+        return res.status(400).json({ message: "Invalid group ID" });
+      }
+      
+      const memberData = insertGroupMemberSchema.parse({
         ...req.body,
-        creatorId: req.user.id
+        groupId
       });
       
-      const crew = await storage.createTravelCrew(crewData);
-      
-      // Add creator as a member
-      await storage.createCrewMember({
-        crewId: crew.id,
-        userId: req.user.id
-      });
-      
-      res.status(201).json(crew);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: error.message });
-      }
-      console.error(error);
-      res.status(500).json({ message: "Failed to create travel crew" });
-    }
-  });
-
-  app.post("/api/crews/:id/members", authMiddleware, async (req, res) => {
-    try {
-      const crewId = Number(req.params.id);
-      const crew = await storage.getTravelCrew(crewId);
-      
-      if (!crew) {
-        return res.status(404).json({ message: "Travel crew not found" });
+      // Check if group exists
+      const group = await storage.getGroup(groupId);
+      if (!group) {
+        return res.status(404).json({ message: "Group not found" });
       }
       
-      const memberData = insertCrewMemberSchema.parse({
-        crewId,
-        userId: req.body.userId
+      // Check if user exists
+      const user = await storage.getUser(memberData.userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      // Check if user is already a member
+      const members = await storage.getGroupMembers(groupId);
+      const isAlreadyMember = members.some(m => m.userId === memberData.userId);
+      
+      if (isAlreadyMember) {
+        return res.status(400).json({ message: "User is already a member" });
+      }
+      
+      const member = await storage.addGroupMember(memberData);
+      
+      // Notify group members via WebSocket
+      members.forEach(m => {
+        const memberWs = wsClients.get(m.userId);
+        if (memberWs) {
+          memberWs.send(JSON.stringify({
+            type: "new_group_member",
+            groupId,
+            userId: memberData.userId
+          }));
+        }
       });
       
-      const member = await storage.createCrewMember(memberData);
       res.status(201).json(member);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: error.message });
+        return res.status(400).json({ message: "Invalid data", errors: error.errors });
       }
-      console.error(error);
-      res.status(500).json({ message: "Failed to add crew member" });
+      res.status(500).json({ message: "Server error" });
     }
   });
-
-  // Travel buddy routes
-  app.get("/api/user/travel-buddies", authMiddleware, async (req, res) => {
+  
+  app.get("/api/groups/:groupId/members", async (req: Request, res: Response) => {
     try {
-      const travelBuddies = await storage.getTravelBuddies(req.user.id);
+      const groupId = parseInt(req.params.groupId);
       
-      // Get user and destination info for each buddy match
-      const buddyMatches = [];
-      for (const buddy of travelBuddies) {
-        const otherUserId = buddy.userOneId === req.user.id ? buddy.userTwoId : buddy.userOneId;
-        const otherUser = await storage.getUser(otherUserId);
-        const destination = await storage.getDestination(buddy.destinationId);
-        
-        if (otherUser && destination) {
-          const { password, ...userWithoutPassword } = otherUser;
-          buddyMatches.push({
-            id: buddy.id,
-            user: userWithoutPassword,
-            destination,
-            matchedAt: buddy.matchedAt
-          });
-        }
+      if (isNaN(groupId)) {
+        return res.status(400).json({ message: "Invalid group ID" });
       }
       
-      res.json(buddyMatches);
+      const members = await storage.getGroupMembers(groupId);
+      
+      // Enrich with user data
+      const enrichedMembers = await Promise.all(
+        members.map(async (member) => {
+          const user = await storage.getUser(member.userId);
+          
+          if (!user) return null;
+          
+          return {
+            ...member,
+            username: user.username,
+            profileImage: user.profileImage
+          };
+        })
+      );
+      
+      // Filter out any null results
+      const validMembers = enrichedMembers.filter(m => m !== null);
+      
+      res.status(200).json(validMembers);
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to fetch travel buddies" });
+      res.status(500).json({ message: "Server error" });
+    }
+  });
+  
+  app.post("/api/groups/:groupId/votes", async (req: Request, res: Response) => {
+    try {
+      const groupId = parseInt(req.params.groupId);
+      
+      if (isNaN(groupId)) {
+        return res.status(400).json({ message: "Invalid group ID" });
+      }
+      
+      const voteData = insertGroupVoteSchema.parse({
+        ...req.body,
+        groupId
+      });
+      
+      // Check if group exists
+      const group = await storage.getGroup(groupId);
+      if (!group) {
+        return res.status(404).json({ message: "Group not found" });
+      }
+      
+      // Check if user is a member
+      const members = await storage.getGroupMembers(groupId);
+      const isMember = members.some(m => m.userId === voteData.userId);
+      
+      if (!isMember) {
+        return res.status(403).json({ message: "User is not a member of this group" });
+      }
+      
+      // Check if destination exists
+      const destination = await storage.getDestination(voteData.destinationId);
+      if (!destination) {
+        return res.status(404).json({ message: "Destination not found" });
+      }
+      
+      const vote = await storage.createGroupVote(voteData);
+      
+      // Notify group members via WebSocket
+      members.forEach(m => {
+        if (m.userId !== voteData.userId) { // Don't notify the voter
+          const memberWs = wsClients.get(m.userId);
+          if (memberWs) {
+            memberWs.send(JSON.stringify({
+              type: "new_group_vote",
+              groupId,
+              userId: voteData.userId,
+              destinationId: voteData.destinationId,
+              liked: voteData.liked
+            }));
+          }
+        }
+      });
+      
+      res.status(201).json(vote);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Server error" });
+    }
+  });
+  
+  app.get("/api/groups/:groupId/votes", async (req: Request, res: Response) => {
+    try {
+      const groupId = parseInt(req.params.groupId);
+      
+      if (isNaN(groupId)) {
+        return res.status(400).json({ message: "Invalid group ID" });
+      }
+      
+      const votes = await storage.getGroupVotes(groupId);
+      
+      // Group votes by destination and count likes
+      const votesByDestination = votes.reduce((acc, vote) => {
+        if (!acc[vote.destinationId]) {
+          acc[vote.destinationId] = { likes: 0, total: 0 };
+        }
+        
+        acc[vote.destinationId].total++;
+        if (vote.liked) {
+          acc[vote.destinationId].likes++;
+        }
+        
+        return acc;
+      }, {} as Record<number, { likes: number, total: number }>);
+      
+      // Enrich with destination data
+      const results = await Promise.all(
+        Object.entries(votesByDestination).map(async ([destId, counts]) => {
+          const destination = await storage.getDestination(parseInt(destId));
+          
+          if (!destination) return null;
+          
+          return {
+            destination,
+            likes: counts.likes,
+            total: counts.total,
+            percentage: Math.round((counts.likes / counts.total) * 100)
+          };
+        })
+      );
+      
+      // Filter out any null results and sort by percentage (highest first)
+      const validResults = results
+        .filter(r => r !== null)
+        .sort((a, b) => b!.percentage - a!.percentage);
+      
+      res.status(200).json(validResults);
+    } catch (error) {
+      res.status(500).json({ message: "Server error" });
     }
   });
 
